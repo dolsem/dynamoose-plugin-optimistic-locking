@@ -234,6 +234,18 @@ test.serial(`${prefix} supports fetchItemOnWriteError option`, async (t) => {
   t.true(error instanceof OptimisticLockException);
   t.truthy(error.itemInDb);
 });
+
+test.serial(`${prefix} throws exception on creating existing item`, async (t) => {
+  Day.plugin(OptimisticLockingPlugin, { fetchItemOnWriteError: true });
+
+  const day = await Day.create({ date: new Date('Feb 01 2019'), events: ['A'] });
+  const error = await Day.create({ date: new Date('Feb 01 2019'), events: ['B'] }).catch((e: Error) => e);
+
+  t.true(error instanceof OptimisticLockException);
+  t.truthy(error.itemInDb);
+  t.is(error.itemInDb.date.getTime(), day.date.getTime());
+  t.is(error.itemInDb.events[0], day.events[0]);
+});
 // #endregion Put
 
 // #region Update
