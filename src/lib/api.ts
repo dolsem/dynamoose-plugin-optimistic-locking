@@ -1,4 +1,4 @@
-import { OptimisticLockingConfig, PutNextVersionOptions } from './interfaces';
+import { OptimisticLockingConfig, PutNextVersionOptions, PutNextVersionResult } from './interfaces';
 import { OptimisticLockException } from './optimistic-lock.exception';
 import { debug } from './utils/debug';
 
@@ -7,9 +7,9 @@ export const extendModel = (model: any, { fetchItemOnWriteError }: OptimisticLoc
 
     async putNextVersion(
       item: any,
-      getNextVersion: (item: any) => void|Promise<void>,
+      updateFunction: (item: any) => boolean|Promise<boolean>,
       { maxAttempts }: PutNextVersionOptions = {},
-    ): Promise<any> {
+    ): Promise<PutNextVersionResult> {
       debug('putNextVersion|called %O', item);
       if (!fetchItemOnWriteError) {
         debug('putNextVersion|failure fetchItemOnWriteError is set to `false`')
@@ -17,10 +17,13 @@ export const extendModel = (model: any, { fetchItemOnWriteError }: OptimisticLoc
       }
 
       let savedItem: any;
-      let attempts = 1;
+      let attempts = 0;
+      let shouldContinue = true;
       while (!savedItem) {
-        await getNextVersion(item);
+        shouldContinue = await updateFunction(item);
+        if (!shouldContinue) { break; }
 
+        attempts += 1;
         debug('putNextVersion|put attempt %d', attempts);
         try {
           savedItem = await model.prototype.put.call(item);
@@ -38,12 +41,18 @@ export const extendModel = (model: any, { fetchItemOnWriteError }: OptimisticLoc
           }
 
           item = err.itemInDb;
-          attempts += 1;
         }
       }
 
-      const result = { item: savedItem, attempts };
-      debug('putNextVersion|success %O', result);
+      let result: PutNextVersionResult;
+      if (!shouldContinue) {
+        result = { item, attempts };
+        debug('putNextVersion|success updateFunction returned false %O', result);
+      } else {
+        result = { item: savedItem, attempts };
+        debug('putNextVersion|success %O', result);
+      }
+
       return result;
     },
 
