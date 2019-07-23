@@ -37,6 +37,9 @@ test.before(async () => {
     events: {
       type: [String],
     },
+    isHoliday: {
+      type: Boolean,
+    },
   });
   Day = dynamoose.model('Day', DaySchema);
 
@@ -85,6 +88,8 @@ test.serial(`${prefix} uses correct defaults`, (t) => {
   t.is(spy.firstCall.args[0].allowUnsupported, false);
   t.is(spy.firstCall.args[0].attributeName, '__version');
   t.is(spy.firstCall.args[0].attributeSymbol.toString(), 'Symbol(version-attribute)');
+
+  spy.restore();
 });
 // #endregion Configuration
 
@@ -421,10 +426,12 @@ test.serial(`${prefix} succeeds`, async (t) => {
   });
   await hp.save();
 
-  const { item: hp2, attempts: hp2Attempts } = await BookCollection.putNextVersion(
-    hp,
-    (item: any) => item.books.push('Harry Potter and the Prizoner of Azkaban')
-  );
+  const { item: hp2, attempts: hp2Attempts } = await BookCollection
+    .putNextVersion(hp, (item: any) => {
+      item.books.push('Harry Potter and the Prizoner of Azkaban');
+      return true;
+    });
+
   t.is(hp2[attributeSymbol], 2);
   t.is(hp2.books.length, 3);
   t.is(hp2Attempts, 1);
@@ -433,10 +440,12 @@ test.serial(`${prefix} succeeds`, async (t) => {
   hpCopy.derivedWorks = ['Harry Potter (Movie Series)'];  
   await hpCopy.save();
 
-  const { item: hp4, attempts: hp4Attempts } = await BookCollection.putNextVersion(
-    hp2,
-    (item: any) => item.books.push('Harry Potter and the Goblet of Fire')
-  );
+  const { item: hp4, attempts: hp4Attempts } = await BookCollection
+    .putNextVersion(hp2, (item: any) => {
+      item.books.push('Harry Potter and the Goblet of Fire');
+      return true;
+    });
+
   t.is(hp4[attributeSymbol], 4);
   t.is(hp4.books.length, 4);
   t.is(hp4Attempts, 2);
@@ -450,17 +459,18 @@ test.serial(`${prefix} succeeds`, async (t) => {
     'Harry Potter and the Philosopher\'s Stone (videogame)',
     'Harry Potter and the Chamber of Secrets (videogame)',
   ];
-  const { item: hp8, attempts: hp8Attempts } = await BookCollection.putNextVersion(
-    hp4,
-    async (item: any) => {
+  const { item: hp8, attempts: hp8Attempts } = await BookCollection
+    .putNextVersion(hp4, async (item: any) => {
       if (i < 2) {
         hpCopy.derivedWorks.push(games[i]);
         await hpCopy.save();
         i += 1;
       }
       item.books.push('Harry Potter and the Order of the Phoenix');
-    }
-  );
+
+      return true;
+    });
+
   t.is(hp8[attributeSymbol], 8);
   t.is(hp8.books.length, 5);
   t.is(hp8Attempts, 3);
@@ -487,36 +497,32 @@ test.serial(`${prefix} supports maxAttempts option`, async (t) => {
   ];
 
   let i = 0;
-  const { item: soue4, attempts } = await BookCollection.putNextVersion(
-    soueCopy,
-    async (item: any) => {
-      if (i < 2) {
-        soue.books.push(books4to8[i]);
-        await soue.save();
-        i += 1;
-      }
-      item.derivedWorks = ['Lemony Snicket\'s A Series of Unfortunate Events (Movie)'];
-    },
-    { maxAttempts: 3 },
-  );
+  const { item: soue4, attempts } = await BookCollection.putNextVersion(soueCopy, async (item: any) => {
+    if (i < 2) {
+      soue.books.push(books4to8[i]);
+      await soue.save();
+      i += 1;
+    }
+    item.derivedWorks = ['Lemony Snicket\'s A Series of Unfortunate Events (Movie)'];
+
+    return true;
+  }, { maxAttempts: 3 });
   t.is(soue4[attributeSymbol], 4);
   t.is(soue4.derivedWorks.length, 1);
   t.is(attempts, 3);
 
   soue = await BookCollection.get(soue);
   try {
-    await BookCollection.putNextVersion(
-      soue4,
-      async (item: any) => {
-        if (i < 5) {
-          soue.books.push(books4to8[i]);
-          await soue.save();
-          i += 1;
-        }
-        item.derivedWorks.push('A Series of Unfortunate Events (TV series)');
-      },
-      { maxAttempts: 3 },
-    );
+    await BookCollection.putNextVersion(soue4, async (item: any) => {
+      if (i < 5) {
+        soue.books.push(books4to8[i]);
+        await soue.save();
+        i += 1;
+      }
+      item.derivedWorks.push('A Series of Unfortunate Events (TV series)');
+
+      return true;
+    }, { maxAttempts: 3 });
   } catch (err) {
     t.truthy(err);
     t.true(err instanceof OptimisticLockException);
@@ -525,5 +531,36 @@ test.serial(`${prefix} supports maxAttempts option`, async (t) => {
     t.truthy(err.itemInDb);
     t.is(err.itemInDb.books.length, 8);
   }
+});
+
+test.serial(`${prefix} breaks out of the loop if updateFunction returns false`, async (t) => {
+  Day.plugin(OptimisticLockingPlugin, { fetchItemOnWriteError: true });
+
+  const day = await Day.create({ date: new Date('Dec 25 2019'), events: ['A'] });
+  await day.save();
+  const dayCopy = await Day.get(day);
+
+  day.isHoliday = true;
+  await day.save();
+
+  const spy = sinon.spy(Day.prototype, 'put');
+
+  const { attempts: emptyAttempts } = await Day.putNextVersion(dayCopy, () => false);
+  t.true(spy.notCalled);
+  t.is(emptyAttempts, 0);
+
+  const { item: updatedDay, attempts } = await Day.putNextVersion(dayCopy, (item: any) => {
+    if (!item.isHoliday) {
+      item.isHoliday = true;
+      return true;
+    }
+    return false;
+  });
+
+  t.true(spy.calledOnce);
+  t.is(attempts, 1);
+  t.true(updatedDay.isHoliday);
+
+  spy.restore();
 });
 // #endregion Put-Next-Version
