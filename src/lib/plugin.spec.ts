@@ -5,9 +5,9 @@ import * as DynamoDbLocal from 'dynamodb-local';
 import dynamoose from 'dynamoose';
 import sinon from 'sinon';
 
-import * as listeners from './src/lib/listeners';
-import { OptimisticLockException } from './src/lib/optimistic-lock.exception';
-import { OptimisticLockingPlugin } from './src/lib/plugin';
+import * as listeners from './listeners';
+import { OptimisticLockException } from './optimistic-lock.exception';
+import { OptimisticLockingPlugin } from './plugin';
 
 const attributeSymbol = Symbol('version');
 
