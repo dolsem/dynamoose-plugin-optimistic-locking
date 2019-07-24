@@ -1,6 +1,6 @@
 {
   "name": "dynamoose-plugin-optimistic-locking",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Dynamoose plugin that implements optimistic locking for db writes",
   "main": "build/main/index.js",
   "typings": "build/main/index.d.ts",
@@ -66,7 +66,7 @@
   },
   "dependencies": {
     "debug": "^4.1.1",
-    "dynamoose": "git+ssh://git@github.com/dolsem/dynamoose.git#package-switch-prepack-to-prepare"
+    "dynamoose": "git+https://github.com/dolsem/dynamoose.git#package-switch-prepack-to-prepare"
   },
   "devDependencies": {
     "@bitjson/npm-scripts-info": "^1.0.0",
